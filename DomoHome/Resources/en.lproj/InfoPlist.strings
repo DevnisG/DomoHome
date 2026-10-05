@@ -1,0 +1,2 @@
+"NSLocalNetworkUsageDescription" = "DomoHome needs access to your local network to control configured devices.";
+"NSDocumentsFolderUsageDescription" = "DomoHome stores your device configuration locally in your Documents folder.";
