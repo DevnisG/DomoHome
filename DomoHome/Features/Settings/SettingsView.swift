@@ -92,6 +92,23 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var doorbellPreferences: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle(L10n.text("Notificaciones del timbre"), isOn: Binding(
+                get: { controller.doorbell.settings.notificationsEnabled },
+                set: { value in
+                    var settings = controller.doorbell.settings
+                    settings.notificationsEnabled = value
+                    controller.updateDoorbellSettings(settings)
+                }
+            ))
+            if controller.doorbell.notificationPermission != "Permitidas" {
+                Button(L10n.text("Permitir notificaciones")) { controller.doorbell.notifications.requestPermission() }
+                    .controlSize(.small)
+            }
+        }
+    }
+
     private var shortcutCard: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
@@ -129,7 +146,7 @@ struct SettingsView: View {
             if controller.lockConfigurationLoaded {
                 shortcutRow(title: L10n.text("Abrir cerradura"), actionID: "door.unlock", icon: "lock.open.fill")
                 Divider()
-                shortcutRow(title: L10n.text("Esperar solicitud"), actionID: "door.wait", icon: "bell.badge.fill")
+                shortcutRow(title: L10n.text("Abrir cerradura (atajo alternativo)"), actionID: "door.wait", icon: "bell.badge.fill")
             }
 
             if shortcutManager.recordingActionID == nil, let feedback = shortcutManager.feedback {
@@ -231,13 +248,20 @@ struct SettingsView: View {
             languageRow
             Divider()
             loginItemRow
-            if loginItemManager.requiresApproval || loginItemManager.hasError {
-                Text(L10n.text(loginItemManager.hasError
-                    ? "No se pudo actualizar el inicio de sesión."
-                    : "Permití DomoHome en Ajustes del Sistema > General > Ítems de inicio."))
+            if let message = loginItemManager.errorMessage {
+                Text(L10n.text(message))
                     .font(.caption)
-                    .foregroundStyle(loginItemManager.hasError ? .orange : .secondary)
+                    .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if loginItemManager.requiresApproval {
+                Button(L10n.text("Permitir en Ajustes del Sistema")) { loginItemManager.openSettings() }
+                    .font(.caption)
+                    .buttonStyle(.link)
+            }
+            if controller.lockConfigurationLoaded {
+                Divider()
+                doorbellListeningRow
             }
             Divider()
             soundRow
@@ -245,6 +269,30 @@ struct SettingsView: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassSurface(cornerRadius: 22)
+    }
+
+    private var doorbellListeningRow: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.text("Escuchar timbre"))
+                    .font(.subheadline.weight(.medium))
+                Text(L10n.text("Al desactivar, se detiene la escucha y se cierran las alertas pendientes."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle(L10n.text("Escuchar timbre"), isOn: Binding(
+                get: { controller.doorbell.settings.enabled },
+                set: { enabled in
+                    var settings = controller.doorbell.settings
+                    settings.enabled = enabled
+                    controller.updateDoorbellSettings(settings)
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
     }
 
     private var loginItemRow: some View {
@@ -259,11 +307,12 @@ struct SettingsView: View {
             Spacer()
             Toggle(L10n.text("Iniciar con la Mac"), isOn: Binding(
                 get: { loginItemManager.isEnabled },
-                set: { loginItemManager.setEnabled($0) }
+                set: { enabled in Task { await loginItemManager.setEnabled(enabled) } }
             ))
             .labelsHidden()
             .toggleStyle(.switch)
             .controlSize(.small)
+            .disabled(loginItemManager.isUpdating)
         }
     }
 
@@ -447,6 +496,10 @@ struct SettingsView: View {
                 .accessibilityLabel(L10n.text("Editar dispositivo") + ": " + L10n.text("Cerradura"))
                 .disabled(hasUnsavedLabels)
             }
+            DisclosureGroup(L10n.text("Timbre Tuya")) {
+                doorbellPreferences.padding(.top, 8)
+            }
+            .font(.callout)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)

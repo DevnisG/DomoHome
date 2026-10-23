@@ -1,9 +1,43 @@
 import Foundation
 import CryptoKit
+import CoreFoundation
 
 struct TuyaCloudAPIError: LocalizedError {
     let message: String
     var errorDescription: String? { L10n.text(message) }
+}
+
+struct TuyaLockStatus: Sendable {
+    let doorIsOpen: Bool?
+    let reportsDoorPosition: Bool
+    let batteryPercentage: Int?
+
+    init(properties: [String: Any]) {
+        let keys = ["door_open", "door_opened", "door_state", "door_sensor_state", "door_sensor", "closed_opened"]
+        reportsDoorPosition = keys.contains { properties[$0] != nil }
+        doorIsOpen = keys.compactMap { key -> Bool? in
+            guard let value = properties[key] else { return nil }
+            if let text = value as? String {
+                switch text.lowercased() {
+                case "open", "opened", "true", "1": return true
+                case "closed", "false", "0": return false
+                default: return nil
+                }
+            }
+            if let number = value as? NSNumber {
+                if number.doubleValue == 0 { return false }
+                if number.doubleValue == 1 { return true }
+            }
+            return nil
+        }.first
+        batteryPercentage = ["residual_electricity", "battery_percentage"].compactMap { key -> Int? in
+            guard let value = properties[key] as? NSNumber,
+                  CFGetTypeID(value) != CFBooleanGetTypeID(),
+                  (0...100).contains(value.doubleValue),
+                  value.doubleValue.rounded() == value.doubleValue else { return nil }
+            return value.intValue
+        }.first
+    }
 }
 
 actor TuyaCloudClient {
@@ -12,15 +46,15 @@ actor TuyaCloudClient {
     private var accessToken = ""
     private var tokenExpiry = Date.distantPast
 
-    init(config: LockConfiguration) {
+    init(config: LockConfiguration, session: URLSession? = nil) {
         self.config = config
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
         configuration.timeoutIntervalForResource = 20
-        self.session = URLSession(configuration: configuration, delegate: CloudRedirectPolicy(), delegateQueue: nil)
+        self.session = session ?? URLSession(configuration: configuration, delegate: CloudRedirectPolicy(), delegateQueue: nil)
     }
 
-    func unlock() async throws -> Bool {
+    func unlock(authorize: @Sendable () async -> Bool) async throws -> Bool {
         try await ensureToken()
         let ticketResponse = try await request(
             method: "POST",
@@ -33,6 +67,10 @@ actor TuyaCloudClient {
             throw TuyaCloudAPIError(message: "Tuya no devolvió ticket_id para la cerradura.")
         }
 
+        try Task.checkCancellation()
+        guard await authorize() else {
+            throw TuyaCloudAPIError(message: "La solicitud venció o la sesión de macOS no está disponible.")
+        }
         let response = try await request(
             method: "POST",
             path: "/v1.0/devices/\(config.lockDeviceID)/door-lock/password-free/open-door",
@@ -41,7 +79,7 @@ actor TuyaCloudClient {
         return (response["result"] as? Bool) ?? false
     }
 
-    func status() async throws -> [String: Any] {
+    func status() async throws -> TuyaLockStatus {
         try await ensureToken()
         let response = try await request(
             method: "GET",
@@ -50,37 +88,15 @@ actor TuyaCloudClient {
         )
 
         var state: [String: Any] = [:]
-        if let list = response["result"] as? [[String: Any]] {
-            for item in list {
-                if let code = item["code"] as? String, let value = item["value"] {
-                    state[code] = value
-                }
+        guard let list = response["result"] as? [[String: Any]], !list.isEmpty else {
+            throw TuyaCloudAPIError(message: "Tuya no devolvió el estado de la cerradura.")
+        }
+        for item in list {
+            if let code = item["code"] as? String, let value = item["value"] {
+                state[code] = value
             }
         }
-        return state
-    }
-
-    func waitAndUnlock(timeout: TimeInterval = 120) async throws -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if Task.isCancelled { throw CancellationError() }
-            if let state = try? await status() {
-                let countdown: Double
-                if let value = state["unlock_request"] as? Double {
-                    countdown = value
-                } else if let value = state["unlock_request"] as? NSNumber {
-                    countdown = value.doubleValue
-                } else {
-                    countdown = 0
-                }
-
-                if countdown > 0, let opened = try? await unlock() {
-                    return opened
-                }
-            }
-            try await Task.sleep(for: .milliseconds(800))
-        }
-        throw TuyaCloudAPIError(message: "Timeout esperando el countdown del timbre (120 s).")
+        return TuyaLockStatus(properties: state)
     }
 
     private func ensureToken() async throws {

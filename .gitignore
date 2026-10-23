@@ -31,5 +31,12 @@ DerivedData/
 *.dSYM/
 *.log
 Config/Signing.local.xcconfig
-docs/
 .vscode/
+Helpers/**/bin/
+Helpers/**/obj/
+
+*.pfx
+*.keychain
+*.keychain-db
+.envrc
+.gitleaks-report*

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -41,8 +42,13 @@ final class HomeController: ObservableObject {
     @Published private(set) var lockTitle = L10n.text("Cerradura")
     @Published private(set) var lockIsOpen = false
     @Published private(set) var lockStateKnown = false
+    @Published private(set) var lockStatus: TuyaLockStatus?
     @Published private(set) var configurationDocument = ConfigurationDocument()
     @Published private(set) var configurationStorageError: String?
+
+    let doorbell = DoorbellService()
+    var onDoorbellInteraction: (() -> Void)?
+    private var notificationSessionID: UUID?
 
     private var lightsConfig: LightsConfiguration?
     private var lockClient: TuyaCloudClient?
@@ -85,6 +91,7 @@ final class HomeController: ObservableObject {
     }
 
     init() {
+        doorbell.onChange = { [weak self] in self?.objectWillChange.send() }
         reloadConfiguration()
         launchTotalChecks = lightSettingsItems.count + (lockConfigurationLoaded ? 1 : 0)
     }
@@ -158,6 +165,8 @@ final class HomeController: ObservableObject {
             lockConfigurationError = configurationMessage(error)
         }
         lockStateKnown = false
+        lockStatus = nil
+        if doorbell.settings.enabled { doorbell.restart(configuration: try? ConfigurationStore.loadLock()) }
 
         if let configurationStorageError {
             statusText = configurationStorageError
@@ -181,6 +190,23 @@ final class HomeController: ObservableObject {
                 }
             }
         }
+    }
+
+    func startDoorbellService() {
+        doorbell.configure()
+        doorbell.notifications.onOpen = { [weak self] sessionID in
+            guard let self else { return }
+            notificationSessionID = sessionID
+            run(.doorUnlock)
+            notificationSessionID = nil
+            onDoorbellInteraction?()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        doorbell.restart(configuration: try? ConfigurationStore.loadLock())
+    }
+
+    func updateDoorbellSettings(_ settings: TuyaDoorbellSettings) {
+        doorbell.update(settings, configuration: try? ConfigurationStore.loadLock())
     }
 
     private func configurationMessage(_ error: Error) -> String? {
@@ -217,7 +243,10 @@ final class HomeController: ObservableObject {
     }
 
     var lockStatusTitle: String {
-        guard lockStateKnown else { return L10n.text("Desconocido") }
+        guard lockStateKnown else {
+            if let lockStatus, !lockStatus.reportsDoorPosition { return L10n.text("Sin sensor de puerta") }
+            return L10n.text("Desconocido")
+        }
         return L10n.text(lockIsOpen ? "Abierta" : "Cerrada")
     }
 
@@ -274,13 +303,21 @@ final class HomeController: ObservableObject {
     @discardableResult
     func run(_ action: Action) -> Bool {
         guard !isBusy, !isLaunching else { return false }
+        if [.doorUnlock, .doorWaitAndUnlock].contains(action), !doorbell.canUnlock {
+            dismissFeedback()
+            statusText = L10n.text("No hay una solicitud vigente para abrir.")
+            statusIsError = true
+            hasActionFeedback = true
+            return false
+        }
+        let requestedSessionID = notificationSessionID
         dismissFeedback()
         isBusy = true
         activeAction = action
         hasActionFeedback = true
         currentTask = Task { [weak self] in
             guard let self else { return }
-            await self.perform(action)
+            await self.perform(action, sessionID: requestedSessionID)
         }
         return true
     }
@@ -367,7 +404,7 @@ final class HomeController: ObservableObject {
         lightGroups = groups
     }
 
-    private func perform(_ action: Action) async {
+    private func perform(_ action: Action, sessionID: UUID? = nil) async {
         var succeeded = false
         var retryAction = action
         defer {
@@ -375,7 +412,7 @@ final class HomeController: ObservableObject {
             activeAction = nil
             currentTask = nil
             if statusIsError {
-                failedAction = retryAction
+                failedAction = [.doorUnlock, .doorWaitAndUnlock].contains(action) ? nil : retryAction
             } else {
                 completedAction = succeeded ? action : nil
                 scheduleFeedbackDismissal()
@@ -421,37 +458,44 @@ final class HomeController: ObservableObject {
                 groupStates[group.id] = current ? .off : .on
                 localNetworkReachable = true
                 statusText = current ? L10n.format("%@: apagado", group.title) : L10n.format("%@: encendido", group.title)
-            case .doorUnlock:
-                guard let lockClient else { throw ConfigurationError.missingFile }
-                statusText = L10n.format("Abriendo %@…", lockTitle)
-                let opened = try await lockClient.unlock()
-                if opened {
-                    lockIsOpen = true
-                    lockStateKnown = true
+            case .doorUnlock, .doorWaitAndUnlock:
+                let sessionAvailable = doorbell.macSession.beginInteraction()
+                guard let lockClient, let coordinator = doorbell.coordinator,
+                      let authorization = await coordinator.reserveUnlock(
+                        sessionID: sessionID, sessionAvailable: sessionAvailable) else {
+                    throw TuyaCloudAPIError(message: "No hay una solicitud vigente o la sesión de macOS no está disponible.")
                 }
-                statusText = opened ? L10n.format("%@: abierta", lockTitle) : L10n.text("Tuya no confirmó la apertura")
-                statusIsError = !opened
-            case .doorWaitAndUnlock:
-                guard let lockClient else { throw ConfigurationError.missingFile }
-                statusText = L10n.text("Esperando solicitud…")
-                let opened = try await lockClient.waitAndUnlock()
-                if opened {
-                    lockIsOpen = true
-                    lockStateKnown = true
+                lockStateKnown = false
+                await doorbell.refresh()
+                statusText = L10n.text("Enviando…")
+                do {
+                    let accepted = try await lockClient.unlock {
+                        let available = await MainActor.run {
+                            self.doorbell.coordinator === coordinator && self.doorbell.settings.enabled
+                                && self.doorbell.macSession.isAvailable()
+                        }
+                        return await coordinator.authorizeSend(sessionID: authorization, sessionAvailable: available)
+                    }
+                    await coordinator.completeUnlock(sessionID: authorization, accepted: accepted)
+                    statusIsError = !accepted
+                } catch {
+                    await coordinator.completeUnlock(sessionID: authorization, accepted: nil)
+                    await doorbell.refresh()
+                    statusText = L10n.text("Estado no confirmado")
+                    statusIsError = true
+                    return
                 }
-                statusText = opened ? L10n.format("%@: abierta", lockTitle) : L10n.text("No se pudo abrir la cerradura")
-                statusIsError = !opened
+                await doorbell.refresh()
+                statusText = doorbell.statusTitle
             case .doorStatus:
                 guard let lockClient else { throw ConfigurationError.missingFile }
                 statusText = L10n.format("Consultando %@…", lockTitle)
                 let deviceStatus = try await lockClient.status()
-                if let reportedState = Self.doorOpenState(in: deviceStatus) {
-                    lockIsOpen = reportedState
-                    lockStateKnown = true
-                } else {
-                    lockStateKnown = false
-                }
+                applyLockStatus(deviceStatus)
                 statusText = L10n.format("%@: %@", lockTitle, lockStatusTitle)
+                if let battery = deviceStatus.batteryPercentage {
+                    statusText += " · " + L10n.format("Batería: %@%%", String(battery))
+                }
             }
             succeeded = !statusIsError
         } catch is CancellationError {
@@ -549,7 +593,7 @@ final class HomeController: ObservableObject {
 
     private enum DeviceCheckResult: Sendable {
         case light(String, Bool?)
-        case lock(Bool?, Bool)
+        case lock(TuyaLockStatus?, Bool)
     }
 
     private struct DeviceCheckSummary {
@@ -587,7 +631,7 @@ final class HomeController: ObservableObject {
                 taskGroup.addTask {
                     do {
                         let response = try await lock.status()
-                        return .lock(Self.doorOpenState(in: response), true)
+                        return .lock(response, true)
                     } catch {
                         return .lock(nil, false)
                     }
@@ -605,8 +649,7 @@ final class HomeController: ObservableObject {
                     applyLightStates(deviceStates)
                     localNetworkReachable = !deviceStates.isEmpty
                 case .lock(let state, let succeeded):
-                    lockStateKnown = state != nil
-                    lockIsOpen = state ?? false
+                    applyLockStatus(state)
                     if !succeeded { failedCount += 1 }
                 }
                 completedCount += 1
@@ -643,21 +686,10 @@ final class HomeController: ObservableObject {
         groupStates = updatedStates
     }
 
-    nonisolated private static func doorOpenState(in status: [String: Any]) -> Bool? {
-        let stateKeys = ["door_open", "door_opened", "door_state", "door_sensor_state"]
-        for key in stateKeys {
-            guard let value = status[key] else { continue }
-            if let boolean = value as? Bool { return boolean }
-            if let number = value as? NSNumber { return number.boolValue }
-            if let text = value as? String {
-                switch text.lowercased() {
-                case "open", "opened", "unlocked", "true", "1": return true
-                case "closed", "locked", "false", "0": return false
-                default: continue
-                }
-            }
-        }
-        return nil
+    private func applyLockStatus(_ status: TuyaLockStatus?) {
+        lockStatus = status
+        lockStateKnown = status?.doorIsOpen != nil
+        lockIsOpen = status?.doorIsOpen ?? false
     }
 }
 

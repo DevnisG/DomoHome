@@ -19,13 +19,15 @@
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>DomoHomeReleaseDate</key>
-	<string>2026-10-05</string>
+	<string>2026-10-22</string>
 	<key>NSDocumentsFolderUsageDescription</key>
 	<string>DomoHome guarda en Documentos la configuración local de tus dispositivos.</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>DomoHomeTuyaMessageEnvironment</key>
+	<string>$(TUYA_MESSAGE_ENVIRONMENT)</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>

@@ -10,7 +10,8 @@
 
 - Encender, apagar y alternar luces individualmente, por grupo o en conjunto.
 - Controlar luces compatibles con Tuya LAN 3.3 en la red local.
-- Consultar una cerradura y solicitar su apertura mediante la API de Tuya Cloud.
+- Recibir el timbre Tuya en un modal compacto con Abrir/Ignorar, también en segundo plano, y solicitar apertura manual dentro de una ventana DP9 vigente.
+- Consultar una cerradura mediante la API de Tuya Cloud.
 - Ejecutar acciones desde la barra de menú o con atajos de teclado globales.
 - Elegir español o inglés y personalizar nombres y grupos.
 
@@ -43,6 +44,12 @@ xcodebuild -project DomoHome.xcodeproj \
 ```
 
 La firma y notarización necesarias para distribuir una app macOS son un paso separado de la compilación local.
+
+## Timbre Tuya
+
+La recepción es opt-in y requiere preparar el helper autocontenido. Todos los accesos a Abrir, incluido ⌥ C si está asignado, validan una ventana DP9 vigente y una sesión de macOS desbloqueada, sin pedir Touch ID. El antiguo atajo Esperar solicitud ahora funciona como apertura manual alternativa. Las luces locales conservan su integración.
+
+Configuración TEST → PROD, seguridad, empaquetado y pruebas pendientes: [TUYA_DOORBELL_SETUP.md](docs/TUYA_DOORBELL_SETUP.md).
 
 ## Desarrollo
 
@@ -101,6 +108,10 @@ xcodebuild -project DomoHome.xcodeproj \
 ```
 
 The signing and notarization required to distribute a macOS app are separate from a local build.
+
+### Tuya doorbell
+
+Opt-in doorbell alerts show a compact Open/Ignore panel, including while the main window is minimized or closed, using a bundled self-contained helper. All opening entry points require a current DP9 window and an unlocked macOS session, without a Touch ID prompt. The legacy wait shortcut now acts as an alternate manual Open action. Local lights keep their existing integration. See [setup, packaging and pending hardware checks](docs/TUYA_DOORBELL_SETUP.md).
 
 ### Development
 

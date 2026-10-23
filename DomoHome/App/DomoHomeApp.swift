@@ -1,18 +1,15 @@
 import AppKit
-import ServiceManagement
 import SwiftUI
 
 @main
 struct DomoHomeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var controller = HomeController()
-    @StateObject private var shortcutManager = GlobalShortcutManager()
 
     var body: some Scene {
         Window("DomoHome", id: "controlPanel") {
             ContentView(appDelegate: appDelegate)
-                .environmentObject(controller)
-                .environmentObject(shortcutManager)
+                .environmentObject(appDelegate.homeController)
+                .environmentObject(appDelegate.globalShortcutManager)
         }
         .defaultSize(width: 780, height: 520)
         .windowResizability(.contentSize)
@@ -20,38 +17,19 @@ struct DomoHomeApp: App {
 }
 
 @MainActor
-final class LoginItemManager: ObservableObject {
-    @Published private(set) var isEnabled = false
-    @Published private(set) var requiresApproval = false
-    @Published private(set) var hasError = false
-
-    init() {
-        refreshStatus()
-    }
-
-    func setEnabled(_ enabled: Bool) {
-        do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-            }
-            hasError = false
-        } catch {
-            hasError = true
-        }
-        refreshStatus()
-    }
-
-    private func refreshStatus() {
-        let status = SMAppService.mainApp.status
-        isEnabled = status == .enabled || status == .requiresApproval
-        requiresApproval = status == .requiresApproval
-    }
-}
-
-@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    let homeController = HomeController()
+    let globalShortcutManager = GlobalShortcutManager()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if !isConfigured {
+            configure(controller: homeController, shortcutManager: globalShortcutManager) {
+                NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+            }
+        }
+        Task { await homeController.bootstrapIfNeeded() }
+    }
+
     private var isConfigured = false
     private var statusItem: NSStatusItem?
     private weak var controller: HomeController?
@@ -71,11 +49,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !isConfigured else { return }
         isConfigured = true
         shortcutManager.configure(controller: controller)
+        controller.onDoorbellInteraction = { [weak self] in self?.openControlPanel?() }
+        controller.startDoorbellService()
         configureStatusItem()
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
            let icon = NSImage(contentsOf: url) {
             NSApp.applicationIconImage = icon
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controller?.doorbell.stop()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -114,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 L10n.text("Abrir"),
                 symbol: "lock.open.fill",
                 action: #selector(unlockDoor(_:)),
-                enabled: !controller.isBusy
+                enabled: !controller.isBusy && controller.doorbell.canUnlock
             ))
         }
 

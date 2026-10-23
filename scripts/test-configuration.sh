@@ -22,12 +22,20 @@ xcrun swiftc -emit-library -module-name ConfigurationTests -sdk "$sdk_path" \
     -F "$framework_path" -L "$library_path" -lXCTestSwiftSupport \
     -Xlinker -rpath -Xlinker "$framework_path" -Xlinker -rpath -Xlinker "$library_path" \
     "$project_root/DomoHome/App/Localization.swift" \
+    "$project_root/DomoHome/App/LoginItemManager.swift" \
     "$project_root/DomoHome/Domain/DeviceConfiguration.swift" \
     "$project_root/DomoHome/Domain/ConfigurationDocument.swift" \
     "$project_root/DomoHome/Infrastructure/Configuration/CredentialStore.swift" \
     "$project_root/DomoHome/Infrastructure/Configuration/ConfigurationValidator.swift" \
     "$project_root/DomoHome/Infrastructure/Configuration/EnvironmentConfiguration.swift" \
     "$project_root/DomoHome/Infrastructure/Configuration/ConfigurationStore.swift" \
+    "$project_root/DomoHome/Infrastructure/Doorbell/TuyaMessage.swift" \
+    "$project_root/DomoHome/Infrastructure/Doorbell/DoorbellNotificationManager.swift" \
+    "$project_root/DomoHome/Infrastructure/Doorbell/TuyaDoorbellCoordinator.swift" \
+    "$project_root/DomoHome/Infrastructure/Tuya/TuyaCloudClient.swift" \
+    "$project_root/Tests/DoorbellTests.swift" \
+    "$project_root/Tests/TuyaCloudAuthorizationTests.swift" \
+    "$project_root/Tests/LoginItemManagerTests.swift" \
     "$project_root/Tests/ConfigurationStoreTests.swift" \
     -o "$test_bundle/Contents/MacOS/ConfigurationTests"
 xcrun xctest "$test_bundle"

@@ -449,7 +449,6 @@ struct ContentView: View {
 
             HStack(spacing: 8) {
                 actionButton(L10n.text("Abrir"), icon: "lock.open.fill", prominent: true, action: .doorUnlock, shortcutActionID: "door.unlock")
-                actionButton(L10n.text("Esperar solicitud"), icon: "bell.badge.fill", action: .doorWaitAndUnlock, shortcutActionID: "door.wait")
                 actionButton(L10n.text("Consultar"), icon: "exclamationmark.circle", action: .doorStatus)
             }
             .disabled(!controller.lockConfigurationLoaded)
@@ -488,7 +487,7 @@ struct ContentView: View {
         }
         .controlSize(.large)
         .glassActionStyle(prominent: prominent)
-        .disabled(controller.isBusy)
+        .disabled(controller.isBusy || ([.doorUnlock, .doorWaitAndUnlock].contains(action) && !controller.doorbell.canUnlock))
         .help(shortcut.map { title + " · " + L10n.format("Atajo: %@", $0) } ?? title)
         .accessibilityValue(isActive ? L10n.text("En curso") : (isComplete ? L10n.text("Completado") : ""))
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: isComplete)
