@@ -49,8 +49,6 @@ La firma y notarización necesarias para distribuir una app macOS son un paso se
 
 La recepción es opt-in y requiere preparar el helper autocontenido. Todos los accesos a Abrir, incluido ⌥ C si está asignado, validan una ventana DP9 vigente y una sesión de macOS desbloqueada, sin pedir Touch ID. El antiguo atajo Esperar solicitud ahora funciona como apertura manual alternativa. Las luces locales conservan su integración.
 
-Configuración TEST → PROD, seguridad, empaquetado y pruebas pendientes: [TUYA_DOORBELL_SETUP.md](docs/TUYA_DOORBELL_SETUP.md).
-
 ## Desarrollo
 
 Las pruebas de configuración usan datos ficticios y un almacén de credenciales en memoria:
@@ -111,7 +109,7 @@ The signing and notarization required to distribute a macOS app are separate fro
 
 ### Tuya doorbell
 
-Opt-in doorbell alerts show a compact Open/Ignore panel, including while the main window is minimized or closed, using a bundled self-contained helper. All opening entry points require a current DP9 window and an unlocked macOS session, without a Touch ID prompt. The legacy wait shortcut now acts as an alternate manual Open action. Local lights keep their existing integration. See [setup, packaging and pending hardware checks](docs/TUYA_DOORBELL_SETUP.md).
+Opt-in doorbell alerts show a compact Open/Ignore panel, including while the main window is minimized or closed, using a bundled self-contained helper. All opening entry points require a current DP9 window and an unlocked macOS session, without a Touch ID prompt.
 
 ### Development
 
@@ -134,6 +132,10 @@ Released under the [MIT License](LICENSE). Copyright © 2026 Denis Gontero · [G
 ### Ajustes / Settings
 
 ![DomoHome settings](github/imgs/settings.jpeg)
+
+### Alerta de Timbre / Dorbell Alert
+
+![DomoHome dbalert](github/imgs/dorbell_alert.jpeg)
 
 ### Barra de menú / Menu bar
 
